@@ -9,7 +9,7 @@
     "watch": "tsc -w",
     "cdk": "cdk",
     "synth": "cdk synth",
-    "deploy": "cdk deploy",
+    "deploy": "cdk deploy --require-approval never",
     "diff": "cdk diff",
     "destroy": "cdk destroy"
   },

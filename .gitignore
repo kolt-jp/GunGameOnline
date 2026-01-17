@@ -151,4 +151,8 @@ UnityProfilerData/
 *.sln.iml
 
 # Build Modules
-LinuxServerArtifact
+LinuxServerArtifact*
+# *.so
+# *.so.0
+# *.x86_64
+

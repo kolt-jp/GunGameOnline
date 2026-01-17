@@ -149,3 +149,6 @@ UnityProfilerData/
 
 # JetBrains Rider
 *.sln.iml
+
+# Build Modules
+LinuxServerArtifact

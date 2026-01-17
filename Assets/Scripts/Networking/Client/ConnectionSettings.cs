@@ -43,8 +43,9 @@ namespace Unity.FPSSample_2
          [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
          static void RuntimeInitializeOnLoad() => Instance = new ConnectionSettings();
 
-         public const string DefaultServerAddress = "127.0.0.1";
-         public const ushort DefaultServerPort = 7979;
+    public const string DefaultServerAddress = "127.0.0.1";
+    // Infra側のデフォルトゲームポート(スタックは7777開放)に合わせる
+    public const ushort DefaultServerPort = 7777;
 
          const string k_IPAddressKey = "IPAddress";
          const string k_PortKey = "Port";

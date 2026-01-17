@@ -8,6 +8,8 @@ using Unity.Mathematics;
 using Unity.NetCode;
 using Unity.Services.Multiplayer;
 using UnityEngine;
+using UnityEngine.Rendering;
+using Unity.Networking.Transport;
 using UnityEngine.SceneManagement;
 
 namespace Unity.FPSSample_2
@@ -53,9 +55,14 @@ namespace Unity.FPSSample_2
 #if UNITY_STANDALONE_LINUX
             m_IsHeadless = true;
 #else
-            var commandLineArgs = new List<string>(System.Environment.GetCommandLineArgs());
-            m_IsHeadless = commandLineArgs.Contains("-batchmode");
+            m_IsHeadless = false;
 #endif
+
+            // If the runtime has no graphics device (Dedicated Server Optimizations, renderless), treat as headless.
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+            {
+                m_IsHeadless = true;
+            }
             ConfigVar.Init();
 
             if (m_IsHeadless)
@@ -73,6 +80,12 @@ namespace Unity.FPSSample_2
         
         async void Start()
         {
+            if (ShouldSkipClientInitialization())
+            {
+                Debug.Log("[GameManager] Server-only/headless runtime detected; skipping client/main menu init.");
+                _ = StartHeadlessServerAsync();
+                return;
+            }
             Application.runInBackground = true; //Prevents dropped connections during multiplayer gameplay
 
             MainCameraSingleton.Instance.GetComponent<Camera>().enabled = true;
@@ -119,11 +132,93 @@ namespace Unity.FPSSample_2
 
         async Task StartMainMenuAsync(CancellationToken cancellationToken)
         {
+            if (ShouldSkipClientInitialization())
+            {
+                return;
+            }
             DestroyLocalSimulationWorld();
             var clientWorld = ClientServerBootstrap.CreateClientWorld("ClientWorld");
             await ScenesLoader.LoadGameplayAsync(null, clientWorld);
             GameSettings.Instance.MainMenuSceneLoaded = true;
             cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        bool ShouldSkipClientInitialization()
+        {
+#if UNITY_SERVER
+            return true;
+#else
+            if (m_IsHeadless)
+                return true;
+
+            // Dedicated server builds typically run without graphics; guard against null device.
+            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
+                return true;
+
+            return false;
+#endif
+        }
+
+        async Task StartHeadlessServerAsync()
+        {
+            try
+            {
+                Application.runInBackground = true;
+
+                // Ensure persistent scene (managers, singletons) is loaded before touching GameSettings/GhostBridge.
+                if (!SceneManager.GetSceneByName("Persistents").isLoaded)
+                {
+                    var loadOp = SceneManager.LoadSceneAsync("Scenes/Persistents", LoadSceneMode.Additive);
+                    if (loadOp != null)
+                    {
+                        while (!loadOp.isDone)
+                        {
+                            await Awaitable.NextFrameAsync();
+                        }
+                    }
+                    // give a frame for awake/start of managers
+                    await Awaitable.NextFrameAsync();
+                }
+
+                GameSettings.Instance.GameState = GlobalGameState.Loading;
+                LoadingData.Instance.UpdateLoading(LoadingData.LoadingSteps.InitializeConnection);
+
+                ushort port;
+                if (!ushort.TryParse(ConnectionSettings.Instance.Port, out port))
+                {
+                    port = ConnectionSettings.DefaultServerPort;
+                    ConnectionSettings.Instance.Port = port.ToString();
+                }
+
+                var listenEndpoint = NetworkEndpoint.AnyIpv4.WithPort(port);
+                Debug.Log($"[GameManager] Starting headless server on {listenEndpoint}");
+
+                var gameConnection = GameConnection.GetServerConnectionSettings(listenEndpoint);
+                SetGameConnection(gameConnection);
+
+                DestroyLocalSimulationWorld();
+
+                var serverWorld = GhostBridgeBootstrap.Instance?.ServerWorld ?? ClientServerBootstrap.CreateServerWorld("ServerWorld");
+                GhostGameObjectUpdateSystem.GatherWorldSystems(serverWorld);
+
+                using var drvQuery = serverWorld.EntityManager.CreateEntityQuery(ComponentType.ReadWrite<NetworkStreamDriver>());
+                drvQuery.CompleteDependency();
+                var serverDriver = drvQuery.GetSingletonRW<NetworkStreamDriver>().ValueRW;
+                GhostBridgeManager.Instance?.SetServerNetworkStreamDriver(serverDriver);
+                serverDriver.Listen(listenEndpoint);
+
+                Debug.Log($"[GameManager] Loading gameplay scene in server world ...");
+                await ScenesLoader.LoadGameplayAsync(serverWorld, null);
+
+                LoadingData.Instance.UpdateLoading(LoadingData.LoadingSteps.LoadingDone);
+                GameSettings.Instance.GameState = GlobalGameState.InGame;
+                Debug.Log($"[GameManager] Headless server ready on {listenEndpoint}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[GameManager] Failed to start headless server: {ex.Message}");
+                Debug.LogException(ex);
+            }
         }
 
         /// <summary>

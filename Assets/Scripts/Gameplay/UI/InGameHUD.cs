@@ -32,9 +32,9 @@ namespace Unity.FPSSample_2
         private const string k_OpenCircularReticleClass = "kits-reticle-opencircular";
 
         // ECS query fields
-        private World m_ClientWorld;
-        private EntityManager m_EntityManager;
-        private EntityQuery m_LocalPlayerQuery;
+    private World m_ClientWorld;
+    private EntityManager m_EntityManager;
+    private EntityQuery? m_LocalPlayerQuery;
 
         void OnEnable()
         {
@@ -79,6 +79,13 @@ namespace Unity.FPSSample_2
 
         void LateUpdate()
         {
+            // Skip entirely for headless/server-only runtime or when default world not ready.
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
+            {
+                m_RootElement.style.display = DisplayStyle.None;
+                return;
+            }
+
             // Toggle HUD visibility based on the overall game state
             bool isInGame = GameSettings.Instance.GameState == GlobalGameState.InGame;
             if (m_RootElement.style.display != (isInGame ? DisplayStyle.Flex : DisplayStyle.None))
@@ -89,21 +96,22 @@ namespace Unity.FPSSample_2
             if (!isInGame) return;
 
             // If the world was destroyed (e.g., returned to main menu), try to re-initialize
-            if (m_ClientWorld == null || !m_ClientWorld.IsCreated)
+            if (!EnsureEcsReady())
             {
-                InitializeEcs();
+                m_RootElement.style.display = DisplayStyle.None;
+                return;
             }
 
             // Ensure the ECS systems are ready
-            if (m_EntityManager == null || !m_LocalPlayerQuery.HasSingleton<PredictedPlayerGhost>())
+            if (!m_LocalPlayerQuery.HasValue || !m_LocalPlayerQuery.Value.HasSingleton<PredictedPlayerGhost>())
             {
-                // No local player entity found, hide the HUD. This occurs when the player is dead.
+                // No local player entity found, hide the HUD. This occurs when the player is dead or not connected.
                 m_RootElement.style.display = DisplayStyle.None;
                 return;
             }
 
             // Get the player's data directly from the ECS component
-            PredictedPlayerGhost playerData = m_LocalPlayerQuery.GetSingleton<PredictedPlayerGhost>();
+            PredictedPlayerGhost playerData = m_LocalPlayerQuery.Value.GetSingleton<PredictedPlayerGhost>();
 
             // Update Health Bar
             if (m_HealthBar != null)
@@ -222,6 +230,52 @@ namespace Unity.FPSSample_2
             m_Reticle.style.unityBackgroundImageTintColor = greyReticleVisual
                 ? new StyleColor(Color.grey)
                 : new StyleColor(Color.white);
+        }
+
+        /// <summary>
+        /// Ensure client world and entity manager are valid and queries set up.
+        /// </summary>
+        /// <returns>true if ready to use queries; false otherwise.</returns>
+        private bool EnsureEcsReady()
+        {
+            // If existing references are disposed, reset them.
+            if (m_ClientWorld != null && !m_ClientWorld.IsCreated)
+            {
+                m_ClientWorld = null;
+                m_LocalPlayerQuery = null;
+            }
+
+            // Try to find a created client world if missing.
+            if (m_ClientWorld == null)
+            {
+                foreach (var world in World.All)
+                {
+                    if (world.IsCreated && world.IsClient())
+                    {
+                        m_ClientWorld = world;
+                        break;
+                    }
+                }
+            }
+
+            if (m_ClientWorld == null || !m_ClientWorld.IsCreated)
+            {
+                m_LocalPlayerQuery = null;
+                return false;
+            }
+
+            // Refresh EntityManager from the active client world
+            m_EntityManager = m_ClientWorld.EntityManager;
+
+            if (m_LocalPlayerQuery == null)
+            {
+                m_LocalPlayerQuery = m_EntityManager.CreateEntityQuery(
+                    ComponentType.ReadOnly<PredictedPlayerGhost>(),
+                    ComponentType.ReadOnly<GhostOwnerIsLocal>()
+                );
+            }
+
+            return m_LocalPlayerQuery.HasValue;
         }
 
         private string GetReticleClassName(ReticleType reticleType)

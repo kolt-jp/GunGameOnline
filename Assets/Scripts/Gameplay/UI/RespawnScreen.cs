@@ -12,9 +12,9 @@ namespace Unity.FPSSample_2.UI
         private VisualElement m_RespawnScreen;
         private Label m_RespawnTimerLabel;
 
-        private World m_ClientWorld;
-        private EntityManager m_EntityManager;
-        private EntityQuery m_LocalPlayerQuery;
+    private World m_ClientWorld;
+    private EntityManager m_EntityManager;
+    private EntityQuery? m_LocalPlayerQuery;
 
         private float m_RespawnCountdown;
         private const float RESPAWN_DURATION = 5.0f;
@@ -30,25 +30,45 @@ namespace Unity.FPSSample_2.UI
             m_RespawnTimerLabel = m_RespawnScreen.Q<Label>("RespawnMessage");
         }
 
-        private void InitializeEcs()
+        private bool EnsureEcsReady()
         {
-            foreach (var world in World.All)
+            // Reset if world got disposed
+            if (m_ClientWorld != null && !m_ClientWorld.IsCreated)
             {
-                if (world.IsClient())
+                m_ClientWorld = null;
+                m_LocalPlayerQuery = null;
+            }
+
+            // Find a client world if missing
+            if (m_ClientWorld == null)
+            {
+                foreach (var world in World.All)
                 {
-                    m_ClientWorld = world;
-                    m_EntityManager = world.EntityManager;
-                    break;
+                    if (world.IsCreated && world.IsClient())
+                    {
+                        m_ClientWorld = world;
+                        break;
+                    }
                 }
             }
 
-            if (m_EntityManager != null)
+            if (m_ClientWorld == null || !m_ClientWorld.IsCreated)
+            {
+                m_LocalPlayerQuery = null;
+                return false;
+            }
+
+            m_EntityManager = m_ClientWorld.EntityManager;
+
+            if (m_LocalPlayerQuery == null)
             {
                 m_LocalPlayerQuery = m_EntityManager.CreateEntityQuery(
                     ComponentType.ReadOnly<PredictedPlayerGhost>(),
                     ComponentType.ReadOnly<GhostOwnerIsLocal>()
                 );
             }
+
+            return m_LocalPlayerQuery.HasValue;
         }
 
         void LateUpdate()
@@ -59,13 +79,13 @@ namespace Unity.FPSSample_2.UI
                 return;
             }
 
-            if (m_ClientWorld == null || !m_ClientWorld.IsCreated)
+            if (!EnsureEcsReady())
             {
-                InitializeEcs();
-                if (m_ClientWorld == null) return;
+                m_RespawnScreen.style.display = DisplayStyle.None;
+                return;
             }
 
-            bool isPlayerAlive = m_LocalPlayerQuery.HasSingleton<PredictedPlayerGhost>();
+            bool isPlayerAlive = m_LocalPlayerQuery.HasValue && m_LocalPlayerQuery.Value.HasSingleton<PredictedPlayerGhost>();
 
             if (isPlayerAlive)
             {

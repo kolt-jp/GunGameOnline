@@ -156,3 +156,4 @@ LinuxServerArtifact*
 # *.so.0
 # *.x86_64
 
+BuildArtifact

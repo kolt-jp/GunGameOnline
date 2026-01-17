@@ -1,4 +1,6 @@
-#if UNITY_SERVER && UGS_SERVER
+// This bootstrap depends on UGS Multiplay (IMultiplaySessionManager).
+// Guard it behind an explicit define so builds without the server package can succeed.
+#if UNITY_SERVER && UGS_SERVER && UGS_MULTIPLAY_SERVER
 using System;
 using System.Threading.Tasks;
 using Unity.Entities;

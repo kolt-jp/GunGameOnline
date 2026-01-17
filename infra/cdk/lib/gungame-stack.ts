@@ -61,9 +61,10 @@ export class GunGameStack extends Stack {
       autoDeleteObjects: false,
     });
 
-    // AMI: Amazon Linux 2 最新
-    const ami = ec2.MachineImage.latestAmazonLinux({
-      generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2,
+    // AMI: Ubuntu 22.04 (glibc 2.35) via lookup (owner: Canonical)
+    const ami = ec2.MachineImage.lookup({
+      name: 'ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*',
+      owners: ['099720109477'],
     });
 
     // EC2インスタンス（t3.small）
@@ -88,8 +89,9 @@ export class GunGameStack extends Stack {
 
     // ユーザーデータ: OSアップデート + 依存 + S3からビルド取得の雛形
     instance.userData.addCommands(
-      'yum update -y',
-      'yum install -y awscli unzip',
+      'export DEBIAN_FRONTEND=noninteractive',
+      'apt-get update -y',
+      'apt-get install -y awscli unzip',
       '# 例: aws s3 cp s3://' + artifactsBucket.bucketName + '/gameserver/latest.zip /opt/game.zip',
       '# 例: unzip -o /opt/game.zip -d /opt/game',
       '# 例: chmod +x /opt/game/ServerBinary',
